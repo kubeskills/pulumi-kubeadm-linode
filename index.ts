@@ -18,23 +18,25 @@ const rootPassword = new random.RandomPassword("linode-root-password", {
     overrideSpecial: "!@#$%^&*()-_=+[]{}<>?",
 });
 
-const bootstrapScriptLines = [
-    "#!/bin/bash",
-    "set -euxo pipefail",
-    "export DEBIAN_FRONTEND=noninteractive",
-    "apt-get update",
-    "apt-get install -y apt-transport-https ca-certificates curl gpg",
-    "mkdir -p /etc/apt/keyrings",
-    "curl -fsSL https://pkgs.k8s.io/core:/stable:/v1.28/deb/Release.key | gpg --dearmor -o /etc/apt/keyrings/kubernetes-apt-keyring.gpg",
-    "echo 'deb [signed-by=/etc/apt/keyrings/kubernetes-apt-keyring.gpg] https://pkgs.k8s.io/core:/stable:/v1.28/deb/ /' > /etc/apt/sources.list.d/kubernetes.list",
-    "apt-get update",
-    "apt-get install -y kubelet kubeadm kubectl",
-    "apt-mark hold kubelet kubeadm kubectl",
-    "systemctl enable kubelet",
-    "swapoff -a || true",
-];
+const createUserData = (hostname: string): string => {
+    const bootstrapScriptLines = [
+        "#!/bin/bash",
+        "set -euxo pipefail",
+        `hostnamectl set-hostname ${hostname}`,
+        "export DEBIAN_FRONTEND=noninteractive",
+        "apt-get update",
+        "apt-get install -y apt-transport-https ca-certificates curl gpg",
+        "mkdir -p /etc/apt/keyrings",
+        "curl -fsSL https://pkgs.k8s.io/core:/stable:/v1.28/deb/Release.key | gpg --dearmor -o /etc/apt/keyrings/kubernetes-apt-keyring.gpg",
+        "echo 'deb [signed-by=/etc/apt/keyrings/kubernetes-apt-keyring.gpg] https://pkgs.k8s.io/core:/stable:/v1.28/deb/ /' > /etc/apt/sources.list.d/kubernetes.list",
+        "apt-get update",
+        "apt-get install -y kubelet kubeadm kubectl",
+        "apt-mark hold kubelet kubeadm kubectl",
+        "systemctl enable kubelet",
+        "swapoff -a || true",
+    ];
 
-const cloudInit = `#cloud-config
+    const cloudInit = `#cloud-config
 package_update: true
 package_upgrade: true
 write_files:
@@ -47,11 +49,15 @@ runcmd:
   - ["/usr/local/bin/bootstrap-kubernetes.sh"]
 `;
 
-const userDataBase64 = Buffer.from(cloudInit).toString("base64");
+    return Buffer.from(cloudInit).toString("base64");
+};
 
 const nodes: linode.Instance[] = [];
 
 for (let i = 0; i < nodeCount; i++) {
+    const hostname = i === 0 ? "controlplane" : "worker";
+    const userDataBase64 = createUserData(hostname);
+
     nodes.push(
         new linode.Instance(`kube-node-${i + 1}`, {
             label: `kube-node-${i + 1}`,
