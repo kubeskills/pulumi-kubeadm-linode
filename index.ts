@@ -1,55 +1,12 @@
 import * as pulumi from "@pulumi/pulumi";
 import * as linode from "@pulumi/linode";
 import * as random from "@pulumi/random";
-import * as command from "@pulumi/command";
-import * as fs from "fs";
-import * as os from "os";
-import * as path from "path";
 
 const config = new pulumi.Config();
 const region = config.get("region") ?? "us-east";
 const instanceType = config.get("instanceType") ?? "g6-standard-2";
 const image = config.get("image") ?? "linode/ubuntu22.04";
 const sshPublicKey = config.require("sshPublicKey");
-const sshUser = config.get("sshUser") ?? "root";
-const sshPrivateKeySecret = config.getSecret("sshPrivateKey");
-const sshPrivateKeyBase64Secret = config.getSecret("sshPrivateKeyBase64");
-const sshPrivateKeyPath = config.get("sshPrivateKeyPath");
-const sshPrivateKeyPassphrase = config.getSecret("sshPrivateKeyPassphrase");
-
-const expandPath = (inputPath: string) => {
-    if (inputPath.startsWith("~")) {
-        return path.join(os.homedir(), inputPath.slice(1));
-    }
-    return path.isAbsolute(inputPath) ? inputPath : path.resolve(inputPath);
-};
-
-let sshPrivateKey: pulumi.Output<string>;
-
-if (sshPrivateKeySecret) {
-    sshPrivateKey = sshPrivateKeySecret;
-} else if (sshPrivateKeyBase64Secret) {
-    sshPrivateKey = sshPrivateKeyBase64Secret.apply((value) =>
-        Buffer.from(value, "base64").toString("utf-8"),
-    );
-} else if (sshPrivateKeyPath) {
-    const expanded = expandPath(sshPrivateKeyPath);
-    let fileContents: string;
-    try {
-        fileContents = fs.readFileSync(expanded, "utf-8");
-    } catch (error) {
-        throw new pulumi.RunError(
-            `Failed to read SSH private key from path '${expanded}': ${
-                error instanceof Error ? error.message : String(error)
-            }`,
-        );
-    }
-    sshPrivateKey = pulumi.secret(fileContents);
-} else {
-    throw new pulumi.RunError(
-        "Configure one of 'sshPrivateKey', 'sshPrivateKeyBase64', or 'sshPrivateKeyPath' Pulumi configs to provide an SSH private key.",
-    );
-}
 const nodeCount = config.getNumber("nodeCount") ?? 2;
 
 const existingVpcId = config.getNumber("existingVpcId");
@@ -145,40 +102,6 @@ for (let i = 0; i < nodeCount; i++) {
     );
 }
 
-const bootstrapResources: command.remote.Command[] = nodes.map((node, index) => {
-    const hostname = hostnames[index];
-    const bootstrapScript = pulumi.interpolate`
-set -euxo pipefail
-hostnamectl set-hostname ${hostname}
-export DEBIAN_FRONTEND=noninteractive
-apt-get update
-apt-get install -y apt-transport-https ca-certificates curl gpg
-mkdir -p /etc/apt/keyrings
-curl -fsSL https://pkgs.k8s.io/core:/stable:/v1.28/deb/Release.key | gpg --dearmor -o /etc/apt/keyrings/kubernetes-apt-keyring.gpg
-echo 'deb [signed-by=/etc/apt/keyrings/kubernetes-apt-keyring.gpg] https://pkgs.k8s.io/core:/stable:/v1.28/deb/ /' > /etc/apt/sources.list.d/kubernetes.list
-apt-get update
-apt-get install -y kubelet kubeadm kubectl
-apt-mark hold kubelet kubeadm kubectl
-systemctl enable kubelet
-swapoff -a || true
-`;
-
-    return new command.remote.Command(`bootstrap-${index + 1}`, {
-        connection: {
-            host: node.ipAddress,
-            user: sshUser,
-            privateKey: sshPrivateKey,
-            privateKeyPassword: sshPrivateKeyPassphrase,
-            dialErrorLimit: 30,
-        },
-        create: bootstrapScript,
-        triggers: [
-            pulumi.interpolate`${hostname}-k8s-bootstrap`,
-            bootstrapScript,
-        ],
-    }, { dependsOn: node });
-});
-
 interface NodeDetails {
     hostname: string;
     id: string;
@@ -229,3 +152,7 @@ export const workerPublicIp = nodeDetailsAll.apply((details) =>
 
 export const vpcId = targetVpcId;
 export const vpcSubnetId = targetVpcSubnetId;
+
+export const ansibleInventoryLines = nodeDetailsAll.apply((details) =>
+    details.map((detail) => `${detail.hostname} ansible_host=${detail.publicIp}`),
+);

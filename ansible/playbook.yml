@@ -1,0 +1,66 @@
+---
+- name: Prepare Kubernetes nodes
+  hosts: kube_nodes
+  become: true
+  vars:
+    kubernetes_apt_release: "https://pkgs.k8s.io/core:/stable:/v1.28"
+    kubernetes_packages:
+      - kubelet
+      - kubeadm
+      - kubectl
+  tasks:
+    - name: Ensure APT dependencies are installed
+      ansible.builtin.apt:
+        name:
+          - apt-transport-https
+          - ca-certificates
+          - curl
+          - gnupg
+        state: present
+        update_cache: true
+
+    - name: Add Kubernetes apt repository GPG key
+      ansible.builtin.get_url:
+        url: "{{ kubernetes_apt_release }}/deb/Release.key"
+        dest: /usr/share/keyrings/kubernetes-apt-keyring.asc
+        mode: '0644'
+
+    - name: Configure Kubernetes apt repository
+      ansible.builtin.copy:
+        dest: /etc/apt/sources.list.d/kubernetes.list
+        mode: '0644'
+        content: |
+          deb [signed-by=/usr/share/keyrings/kubernetes-apt-keyring.asc] {{ kubernetes_apt_release }}/deb/ /
+
+    - name: Update apt cache after adding Kubernetes repository
+      ansible.builtin.apt:
+        update_cache: true
+
+    - name: Install Kubernetes components
+      ansible.builtin.apt:
+        name: "{{ kubernetes_packages }}"
+        state: present
+
+    - name: Hold Kubernetes packages at current version
+      ansible.builtin.shell: "apt-mark hold {{ item }}"
+      args:
+        warn: false
+      loop: "{{ kubernetes_packages }}"
+      register: hold_result
+      changed_when: "'marking' in hold_result.stdout.lower() or hold_result.rc == 0"
+
+    - name: Enable kubelet service
+      ansible.builtin.systemd:
+        name: kubelet
+        enabled: true
+        state: started
+
+    - name: Optionally set hostname when provided
+      ansible.builtin.hostname:
+        name: "{{ node_hostname }}"
+      when: node_hostname is defined
+
+    - name: Ensure swap is disabled
+      ansible.builtin.command: swapoff -a
+      when: ansible_swaptotal_mb | default(0) | int > 0
+      changed_when: false

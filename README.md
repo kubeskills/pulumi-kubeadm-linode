@@ -1,12 +1,12 @@
 # Create Kubeadm Cluster on Linode with Pulumi
 
-This Pulumi program provisions two Linode instances (or a configurable count) inside a Linode VPC and bootstraps each node with `kubectl`, `kubeadm`, and `kubelet` by running a remote configuration script over SSH. The instances are ready to be joined into a kubeadm-managed Kubernetes cluster once provisioning completes.
+This Pulumi program provisions two Linode instances (or a configurable count) inside a Linode VPC. After the infrastructure is created, run the included Ansible playbook to install and hold `kubectl`, `kubeadm`, and `kubelet`, leaving each node ready for a kubeadm-managed Kubernetes cluster.
 
 ## Prerequisites
 - Pulumi CLI configured with Linode access token (`linode:token` config).
 - Node.js 18+ and npm.
-- An SSH key pair whose public key you can authorize on each instance.
-  Make sure to set `sshPublicKey` and either `sshPrivateKey`, `sshPrivateKeyBase64`, or `sshPrivateKeyPath` with the matching key material. If the private key is encrypted, set `sshPrivateKeyPassphrase` as well.
+- An SSH key pair whose public key you can authorize on each instance (for connecting via Ansible).
+- Ansible 2.14+ (or later) for post-provision configuration.
 
 ## Setup
 ```bash
@@ -14,16 +14,6 @@ npm install
 pulumi stack init kubeadm-dev  # or reuse an existing stack
 pulumi config set linode:token <your-linode-token> --secret
 pulumi config set sshPublicKey "$(cat ~/.ssh/id_rsa.pub)"
-# Choose one of the following options to provide the private key:
-pulumi config set sshPrivateKey "$(cat ~/.ssh/id_rsa)" --secret
-# OR encode to Base64 if your shell struggles with newlines:
-pulumi config set sshPrivateKeyBase64 "$(base64 < ~/.ssh/id_rsa)" --secret
-# OR reference a path readable by Pulumi:
-pulumi config set sshPrivateKeyPath ~/.ssh/id_rsa
-# If your private key is passphrase protected:
-pulumi config set sshPrivateKeyPassphrase "your-passphrase" --secret
-# Optional SSH overrides
-pulumi config set sshUser root
 # Optional overrides
 pulumi config set region us-east
 pulumi config set instanceType g6-standard-2
@@ -41,12 +31,26 @@ pulumi config set existingVpcSubnetId 654321
 pulumi up
 ```
 
-Exports include Linode instance IDs, public IPs, and private IPs (all labeled by hostname), along with the VPC and subnet identifiers.
-Public IPs are labeled with their hostnames (`controlplane`, `worker`) for easy identification after `pulumi up`.
+Exports include Linode instance IDs, public IPs, and private IPs (all labeled by hostname), along with the VPC and subnet identifiers. The `ansibleInventoryLines` export prints helper lines (`hostname ansible_host=IP`) you can paste into an Ansible inventory file.
 
 When `existingVpcId` and `existingVpcSubnetId` are supplied, the stack attaches the instances to that network instead of creating a new VPC.
 
-Each instance is configured immediately after provisioning via the Pulumi Command provider over SSH (default user `root`, override with `sshUser`). The SSH key is taken from `sshPrivateKey`, `sshPrivateKeyBase64`, or `sshPrivateKeyPath`, with optional `sshPrivateKeyPassphrase` support. Once connected, `hostnamectl` sets the hostname, Kubernetes apt repositories are added, and `kubeadm`, `kubelet`, and `kubectl` are installed and held to the current version.
+After `pulumi up`, configure the nodes with Ansible using the playbook at `ansible/playbook.yml`:
+
+```bash
+# Example: capture inventory lines into a file
+pulumi stack output ansibleInventoryLines --json | jq -r '.[]' > inventory.ini
+
+# Edit inventory.ini to group hosts, optionally supplying desired hostnames
+[kube_nodes]
+controlplane ansible_host=198.51.100.10 node_hostname=controlplane
+worker ansible_host=198.51.100.11 node_hostname=worker
+
+# Run the playbook (assumes your SSH key matches the authorized key configured above)
+ansible-playbook -i inventory.ini ansible/playbook.yml
+```
+
+The playbook installs Kubernetes components, holds their versions, enables the kubelet, optionally sets a hostname when `node_hostname` is provided, and disables swap.
 
 ## Cleanup
 When you are finished, remove the resources with:
