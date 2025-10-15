@@ -53,9 +53,12 @@ runcmd:
 };
 
 const nodes: linode.Instance[] = [];
+const hostnames: string[] = [];
 
 for (let i = 0; i < nodeCount; i++) {
-    const hostname = i === 0 ? "controlplane" : "worker";
+    const hostname =
+        i === 0 ? "controlplane" : i === 1 ? "worker" : `worker-${i}`;
+    hostnames.push(hostname);
     const userDataBase64 = createUserData(hostname);
 
     nodes.push(
@@ -75,6 +78,45 @@ for (let i = 0; i < nodeCount; i++) {
     );
 }
 
-export const instanceIds = nodes.map((node) => node.id);
-export const publicIps = nodes.map((node) => node.ipAddress);
-export const privateIps = nodes.map((node) => node.privateIpAddress);
+const nodeDetailsOutputs = nodes.map((node, index) =>
+    pulumi
+        .all({
+            id: node.id,
+            publicIp: node.ipAddress,
+            privateIp: node.privateIpAddress,
+        })
+        .apply((details) => ({
+            hostname: hostnames[index],
+            ...details,
+        })),
+);
+
+const nodeDetailsAll = pulumi.all(nodeDetailsOutputs);
+
+export const nodeDetails = nodeDetailsAll;
+
+export const instanceIds = nodeDetailsAll.apply((details) =>
+    details.map((detail) => detail.id),
+);
+
+export const publicIps = nodeDetailsAll.apply((details) =>
+    details.map((detail) => ({
+        hostname: detail.hostname,
+        ip: detail.publicIp,
+    })),
+);
+
+export const privateIps = nodeDetailsAll.apply((details) =>
+    details.map((detail) => ({
+        hostname: detail.hostname,
+        ip: detail.privateIp,
+    })),
+);
+
+export const controlplanePublicIp = nodeDetailsAll.apply((details) =>
+    details.find((d) => d.hostname === "controlplane")?.publicIp,
+);
+
+export const workerPublicIp = nodeDetailsAll.apply((details) =>
+    details.find((d) => d.hostname === "worker")?.publicIp,
+);

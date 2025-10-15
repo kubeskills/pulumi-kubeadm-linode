@@ -25,6 +25,7 @@ pulumi up
 ```
 
 Exports include Linode instance IDs, public IPs, and private IPs for the nodes.
+Public IPs are labeled with their hostnames (`controlplane`, `worker`) for easy identification after `pulumi up`.
 
 ## Cleanup
 When you are finished, remove the resources with:
