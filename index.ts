@@ -2,14 +2,54 @@ import * as pulumi from "@pulumi/pulumi";
 import * as linode from "@pulumi/linode";
 import * as random from "@pulumi/random";
 import * as command from "@pulumi/command";
+import * as fs from "fs";
+import * as os from "os";
+import * as path from "path";
 
 const config = new pulumi.Config();
 const region = config.get("region") ?? "us-east";
 const instanceType = config.get("instanceType") ?? "g6-standard-2";
 const image = config.get("image") ?? "linode/ubuntu22.04";
 const sshPublicKey = config.require("sshPublicKey");
-const sshPrivateKey = config.requireSecret("sshPrivateKey");
 const sshUser = config.get("sshUser") ?? "root";
+const sshPrivateKeySecret = config.getSecret("sshPrivateKey");
+const sshPrivateKeyBase64Secret = config.getSecret("sshPrivateKeyBase64");
+const sshPrivateKeyPath = config.get("sshPrivateKeyPath");
+const sshPrivateKeyPassphrase = config.getSecret("sshPrivateKeyPassphrase");
+
+const expandPath = (inputPath: string) => {
+    if (inputPath.startsWith("~")) {
+        return path.join(os.homedir(), inputPath.slice(1));
+    }
+    return path.isAbsolute(inputPath) ? inputPath : path.resolve(inputPath);
+};
+
+let sshPrivateKey: pulumi.Output<string>;
+
+if (sshPrivateKeySecret) {
+    sshPrivateKey = sshPrivateKeySecret;
+} else if (sshPrivateKeyBase64Secret) {
+    sshPrivateKey = sshPrivateKeyBase64Secret.apply((value) =>
+        Buffer.from(value, "base64").toString("utf-8"),
+    );
+} else if (sshPrivateKeyPath) {
+    const expanded = expandPath(sshPrivateKeyPath);
+    let fileContents: string;
+    try {
+        fileContents = fs.readFileSync(expanded, "utf-8");
+    } catch (error) {
+        throw new pulumi.RunError(
+            `Failed to read SSH private key from path '${expanded}': ${
+                error instanceof Error ? error.message : String(error)
+            }`,
+        );
+    }
+    sshPrivateKey = pulumi.secret(fileContents);
+} else {
+    throw new pulumi.RunError(
+        "Configure one of 'sshPrivateKey', 'sshPrivateKeyBase64', or 'sshPrivateKeyPath' Pulumi configs to provide an SSH private key.",
+    );
+}
 const nodeCount = config.getNumber("nodeCount") ?? 2;
 
 const existingVpcId = config.getNumber("existingVpcId");
@@ -128,6 +168,7 @@ swapoff -a || true
             host: node.ipAddress,
             user: sshUser,
             privateKey: sshPrivateKey,
+            privateKeyPassword: sshPrivateKeyPassphrase,
             dialErrorLimit: 30,
         },
         create: bootstrapScript,
