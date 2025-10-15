@@ -212,6 +212,9 @@ npm-debug.log*
 .npm/
 .npmrc
 
+# Node.js lockfiles
+package-lock.json
+
 # Compiled TypeScript output
 bin/
 
