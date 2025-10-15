@@ -1,0 +1,3 @@
+name: pulumi-kubeadm-linode
+runtime: nodejs
+description: Provision two Linode instances and prepare them for kubeadm.
