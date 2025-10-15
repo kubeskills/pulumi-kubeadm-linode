@@ -20,6 +20,9 @@ pulumi config set nodeCount 2
 pulumi config set vpcLabel kubeadm-vpc
 pulumi config set vpcSubnetLabel kubeadm-subnet
 pulumi config set vpcSubnetCidr 10.0.0.0/24
+# Or target an existing VPC and subnet (numeric IDs from the Linode API/Cloud Manager)
+pulumi config set existingVpcId 123456
+pulumi config set existingVpcSubnetId 654321
 ```
 
 ## Deploy
@@ -29,6 +32,8 @@ pulumi up
 
 Exports include Linode instance IDs, public IPs, and private IPs (all labeled by hostname), along with the VPC and subnet identifiers.
 Public IPs are labeled with their hostnames (`controlplane`, `worker`) for easy identification after `pulumi up`.
+
+When `existingVpcId` and `existingVpcSubnetId` are supplied, the stack attaches the instances to that network instead of creating a new VPC.
 
 ## Cleanup
 When you are finished, remove the resources with:

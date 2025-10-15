@@ -44,18 +44,45 @@ const instanceType = (_b = config.get("instanceType")) !== null && _b !== void 0
 const image = (_c = config.get("image")) !== null && _c !== void 0 ? _c : "linode/ubuntu22.04";
 const sshPublicKey = config.require("sshPublicKey");
 const nodeCount = (_d = config.getNumber("nodeCount")) !== null && _d !== void 0 ? _d : 2;
-const stack = pulumi.getStack();
-const sanitizeLabel = (label, fallback) => {
-    const sanitized = label
-        .replace(/[^a-zA-Z0-9-]/g, "-")
-        .replace(/-+/g, "-")
-        .replace(/^-+/, "")
-        .replace(/-+$/, "");
-    return sanitized.length > 0 ? sanitized : fallback;
-};
-const vpcLabel = (_e = config.get("vpcLabel")) !== null && _e !== void 0 ? _e : sanitizeLabel(`kubeadm-vpc-${stack}`, "kubeadm-vpc");
-const vpcSubnetLabel = (_f = config.get("vpcSubnetLabel")) !== null && _f !== void 0 ? _f : sanitizeLabel(`kubeadm-subnet-${stack}`, "kubeadm-subnet");
-const vpcSubnetCidr = (_g = config.get("vpcSubnetCidr")) !== null && _g !== void 0 ? _g : "10.0.0.0/24";
+const existingVpcId = config.getNumber("existingVpcId");
+const existingVpcSubnetId = config.getNumber("existingVpcSubnetId");
+if ((existingVpcId === undefined) !== (existingVpcSubnetId === undefined)) {
+    throw new Error("Both existingVpcId and existingVpcSubnetId must be provided together to use an existing VPC.");
+}
+let targetVpcId;
+let targetVpcSubnetId;
+let kubeVpc;
+let kubeVpcSubnet;
+if (existingVpcId !== undefined && existingVpcSubnetId !== undefined) {
+    targetVpcId = pulumi.output(existingVpcId);
+    targetVpcSubnetId = pulumi.output(existingVpcSubnetId);
+}
+else {
+    const stack = pulumi.getStack();
+    const sanitizeLabel = (label, fallback) => {
+        const sanitized = label
+            .replace(/[^a-zA-Z0-9-]/g, "-")
+            .replace(/-+/g, "-")
+            .replace(/^-+/, "")
+            .replace(/-+$/, "");
+        return sanitized.length > 0 ? sanitized : fallback;
+    };
+    const vpcLabel = (_e = config.get("vpcLabel")) !== null && _e !== void 0 ? _e : sanitizeLabel(`kubeadm-vpc-${stack}`, "kubeadm-vpc");
+    const vpcSubnetLabel = (_f = config.get("vpcSubnetLabel")) !== null && _f !== void 0 ? _f : sanitizeLabel(`kubeadm-subnet-${stack}`, "kubeadm-subnet");
+    const vpcSubnetCidr = (_g = config.get("vpcSubnetCidr")) !== null && _g !== void 0 ? _g : "10.0.0.0/24";
+    kubeVpc = new linode.Vpc("cluster-vpc", {
+        label: vpcLabel,
+        region,
+        description: "Pulumi-managed VPC for kubeadm nodes",
+    });
+    targetVpcId = kubeVpc.id.apply((id) => parseInt(id, 10));
+    kubeVpcSubnet = new linode.VpcSubnet("cluster-subnet", {
+        vpcId: targetVpcId,
+        label: vpcSubnetLabel,
+        ipv4: vpcSubnetCidr,
+    });
+    targetVpcSubnetId = kubeVpcSubnet.id.apply((id) => parseInt(id, 10));
+}
 const rootPassword = new random.RandomPassword("linode-root-password", {
     length: 20,
     minLower: 1,
@@ -64,18 +91,6 @@ const rootPassword = new random.RandomPassword("linode-root-password", {
     minSpecial: 1,
     overrideSpecial: "!@#$%^&*()-_=+[]{}<>?",
 });
-const kubeVpc = new linode.Vpc("cluster-vpc", {
-    label: vpcLabel,
-    region,
-    description: "Pulumi-managed VPC for kubeadm nodes",
-});
-const kubeVpcId = kubeVpc.id.apply((id) => Number(id));
-const kubeVpcSubnet = new linode.VpcSubnet("cluster-subnet", {
-    vpcId: kubeVpcId,
-    label: vpcSubnetLabel,
-    ipv4: vpcSubnetCidr,
-});
-const kubeVpcSubnetId = kubeVpcSubnet.id.apply((id) => Number(id));
 const createUserData = (hostname) => {
     const bootstrapScriptLines = [
         "#!/bin/bash",
@@ -129,8 +144,8 @@ for (let i = 0; i < nodeCount; i++) {
             },
             {
                 purpose: "vpc",
-                vpcId: kubeVpcId,
-                subnetId: kubeVpcSubnetId,
+                vpcId: targetVpcId,
+                subnetId: targetVpcSubnetId,
             },
         ],
         metadatas: [
@@ -161,5 +176,5 @@ exports.privateIps = nodeDetailsAll.apply((details) => details.map((detail) => (
 })));
 exports.controlplanePublicIp = nodeDetailsAll.apply((details) => { var _a; return (_a = details.find((d) => d.hostname === "controlplane")) === null || _a === void 0 ? void 0 : _a.publicIp; });
 exports.workerPublicIp = nodeDetailsAll.apply((details) => { var _a; return (_a = details.find((d) => d.hostname === "worker")) === null || _a === void 0 ? void 0 : _a.publicIp; });
-exports.vpcId = kubeVpcId;
-exports.vpcSubnetId = kubeVpcSubnetId;
+exports.vpcId = targetVpcId;
+exports.vpcSubnetId = targetVpcSubnetId;

@@ -1,0 +1,11 @@
+config:
+  linode:token:
+    secure: AAABAEOHSGtAUvgRx196Jin8qcpAkIyRc7gUypUwExYbK343ci+V5Oti3n4vvQkXW67oK9e912tdv33TwkaHOdR5kciGNbzb1pFOTZAUKhd6c82PiekfRtPU5lv/CQTH
+  pulumi-kubeadm-linode:sshPublicKey: ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIIOkCOSgg8lYZVhRXZpw+U+FqbnZPHLIT49RRQFkmHXo chadmcrowell@gmail.com
+  pulumi-kubeadm-linode:region: es-mad
+  pulumi-kubeadm-linode:instanceType: g6-standard-2
+  pulumi-kubeadm-linode:nodeCount: "2"
+  pulumi-kubeadm-linode:vpcLabel: es-mad-vpc
+  pulumi-kubeadm-linode:vpcSubnetLabel: es-mad-subnet
+  pulumi-kubeadm-linode:vpcSubnetCIDR: 192.168.0.0/24
+  pulumi-kubeadm-linode:vpcSubnetCidr: 192.168.0.0/24

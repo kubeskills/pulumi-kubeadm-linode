@@ -9,20 +9,56 @@ const image = config.get("image") ?? "linode/ubuntu22.04";
 const sshPublicKey = config.require("sshPublicKey");
 const nodeCount = config.getNumber("nodeCount") ?? 2;
 
-const stack = pulumi.getStack();
-const sanitizeLabel = (label: string, fallback: string) => {
-    const sanitized = label
-        .replace(/[^a-zA-Z0-9-]/g, "-")
-        .replace(/-+/g, "-")
-        .replace(/^-+/, "")
-        .replace(/-+$/, "");
-    return sanitized.length > 0 ? sanitized : fallback;
-};
+const existingVpcId = config.getNumber("existingVpcId");
+const existingVpcSubnetId = config.getNumber("existingVpcSubnetId");
 
-const vpcLabel = config.get("vpcLabel") ?? sanitizeLabel(`kubeadm-vpc-${stack}`, "kubeadm-vpc");
-const vpcSubnetLabel =
-    config.get("vpcSubnetLabel") ?? sanitizeLabel(`kubeadm-subnet-${stack}`, "kubeadm-subnet");
-const vpcSubnetCidr = config.get("vpcSubnetCidr") ?? "10.0.0.0/24";
+if ((existingVpcId === undefined) !== (existingVpcSubnetId === undefined)) {
+    throw new Error(
+        "Both existingVpcId and existingVpcSubnetId must be provided together to use an existing VPC.",
+    );
+}
+
+let targetVpcId: pulumi.Output<number>;
+let targetVpcSubnetId: pulumi.Output<number>;
+let kubeVpc: linode.Vpc | undefined;
+let kubeVpcSubnet: linode.VpcSubnet | undefined;
+
+if (existingVpcId !== undefined && existingVpcSubnetId !== undefined) {
+    targetVpcId = pulumi.output(existingVpcId);
+    targetVpcSubnetId = pulumi.output(existingVpcSubnetId);
+} else {
+    const stack = pulumi.getStack();
+    const sanitizeLabel = (label: string, fallback: string) => {
+        const sanitized = label
+            .replace(/[^a-zA-Z0-9-]/g, "-")
+            .replace(/-+/g, "-")
+            .replace(/^-+/, "")
+            .replace(/-+$/, "");
+        return sanitized.length > 0 ? sanitized : fallback;
+    };
+
+    const vpcLabel =
+        config.get("vpcLabel") ?? sanitizeLabel(`kubeadm-vpc-${stack}`, "kubeadm-vpc");
+    const vpcSubnetLabel =
+        config.get("vpcSubnetLabel") ?? sanitizeLabel(`kubeadm-subnet-${stack}`, "kubeadm-subnet");
+    const vpcSubnetCidr = config.get("vpcSubnetCidr") ?? "10.0.0.0/24";
+
+    kubeVpc = new linode.Vpc("cluster-vpc", {
+        label: vpcLabel,
+        region,
+        description: "Pulumi-managed VPC for kubeadm nodes",
+    });
+
+    targetVpcId = kubeVpc.id.apply((id) => parseInt(id, 10));
+
+    kubeVpcSubnet = new linode.VpcSubnet("cluster-subnet", {
+        vpcId: targetVpcId,
+        label: vpcSubnetLabel,
+        ipv4: vpcSubnetCidr,
+    });
+
+    targetVpcSubnetId = kubeVpcSubnet.id.apply((id) => parseInt(id, 10));
+}
 
 const rootPassword = new random.RandomPassword("linode-root-password", {
     length: 20,
@@ -32,22 +68,6 @@ const rootPassword = new random.RandomPassword("linode-root-password", {
     minSpecial: 1,
     overrideSpecial: "!@#$%^&*()-_=+[]{}<>?",
 });
-
-const kubeVpc = new linode.Vpc("cluster-vpc", {
-    label: vpcLabel,
-    region,
-    description: "Pulumi-managed VPC for kubeadm nodes",
-});
-
-const kubeVpcId = kubeVpc.id.apply((id) => Number(id));
-
-const kubeVpcSubnet = new linode.VpcSubnet("cluster-subnet", {
-    vpcId: kubeVpcId,
-    label: vpcSubnetLabel,
-    ipv4: vpcSubnetCidr,
-});
-
-const kubeVpcSubnetId = kubeVpcSubnet.id.apply((id) => Number(id));
 
 const createUserData = (hostname: string): string => {
     const bootstrapScriptLines = [
@@ -109,8 +129,8 @@ for (let i = 0; i < nodeCount; i++) {
                 },
                 {
                     purpose: "vpc",
-                    vpcId: kubeVpcId,
-                    subnetId: kubeVpcSubnetId,
+                    vpcId: targetVpcId,
+                    subnetId: targetVpcSubnetId,
                 },
             ],
             metadatas: [
@@ -170,5 +190,5 @@ export const workerPublicIp = nodeDetailsAll.apply((details) =>
     details.find((d) => d.hostname === "worker")?.publicIp,
 );
 
-export const vpcId = kubeVpcId;
-export const vpcSubnetId = kubeVpcSubnetId;
+export const vpcId = targetVpcId;
+export const vpcSubnetId = targetVpcSubnetId;
