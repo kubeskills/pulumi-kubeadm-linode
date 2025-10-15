@@ -129,7 +129,6 @@ for (let i = 0; i < nodeCount; i++) {
                 },
                 {
                     purpose: "vpc",
-                    vpcId: targetVpcId,
                     subnetId: targetVpcSubnetId,
                 },
             ],
