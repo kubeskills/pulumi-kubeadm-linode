@@ -1,6 +1,6 @@
 # Create Kubeadm Cluster on Linode with Pulumi
 
-This Pulumi program provisions two Linode instances (or a configurable count) inside a Linode VPC and bootstraps each node with `kubectl`, `kubeadm`, and `kubelet` using cloud-init. The instances are ready to be joined into a kubeadm-managed Kubernetes cluster once provisioning completes.
+This Pulumi program provisions two Linode instances (or a configurable count) inside a Linode VPC and bootstraps each node with `kubectl`, `kubeadm`, and `kubelet` by running a remote configuration script over SSH. The instances are ready to be joined into a kubeadm-managed Kubernetes cluster once provisioning completes.
 
 ## Prerequisites
 - Pulumi CLI configured with Linode access token (`linode:token` config).
@@ -34,6 +34,8 @@ Exports include Linode instance IDs, public IPs, and private IPs (all labeled by
 Public IPs are labeled with their hostnames (`controlplane`, `worker`) for easy identification after `pulumi up`.
 
 When `existingVpcId` and `existingVpcSubnetId` are supplied, the stack attaches the instances to that network instead of creating a new VPC.
+
+Each instance is configured immediately after provisioning via the Pulumi Command provider—`hostnamectl` sets the hostname, Kubernetes apt repositories are added, and `kubeadm`, `kubelet`, and `kubectl` are installed and held to the current version.
 
 ## Cleanup
 When you are finished, remove the resources with:

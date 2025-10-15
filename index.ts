@@ -1,6 +1,7 @@
 import * as pulumi from "@pulumi/pulumi";
 import * as linode from "@pulumi/linode";
 import * as random from "@pulumi/random";
+import * as command from "@pulumi/command";
 
 const config = new pulumi.Config();
 const region = config.get("region") ?? "us-east";
@@ -68,40 +69,7 @@ const rootPassword = new random.RandomPassword("linode-root-password", {
     minSpecial: 1,
     overrideSpecial: "!@#$%^&*()-_=+[]{}<>?",
 });
-
-const createUserData = (hostname: string): string => {
-    const bootstrapScriptLines = [
-        "#!/bin/bash",
-        "set -euxo pipefail",
-        `hostnamectl set-hostname ${hostname}`,
-        "export DEBIAN_FRONTEND=noninteractive",
-        "apt-get update",
-        "apt-get install -y apt-transport-https ca-certificates curl gpg",
-        "mkdir -p /etc/apt/keyrings",
-        "curl -fsSL https://pkgs.k8s.io/core:/stable:/v1.28/deb/Release.key | gpg --dearmor -o /etc/apt/keyrings/kubernetes-apt-keyring.gpg",
-        "echo 'deb [signed-by=/etc/apt/keyrings/kubernetes-apt-keyring.gpg] https://pkgs.k8s.io/core:/stable:/v1.28/deb/ /' > /etc/apt/sources.list.d/kubernetes.list",
-        "apt-get update",
-        "apt-get install -y kubelet kubeadm kubectl",
-        "apt-mark hold kubelet kubeadm kubectl",
-        "systemctl enable kubelet",
-        "swapoff -a || true",
-    ];
-
-    const cloudInit = `#cloud-config
-package_update: true
-package_upgrade: true
-write_files:
-  - path: /usr/local/bin/bootstrap-kubernetes.sh
-    owner: root:root
-    permissions: '0755'
-    content: |
-${bootstrapScriptLines.map((line) => `      ${line}`).join("\n")}
-runcmd:
-  - ["/usr/local/bin/bootstrap-kubernetes.sh"]
-`;
-
-    return Buffer.from(cloudInit).toString("base64");
-};
+const rootPasswordSecret = pulumi.secret(rootPassword.result);
 
 const nodes: linode.Instance[] = [];
 const hostnames: string[] = [];
@@ -110,7 +78,6 @@ for (let i = 0; i < nodeCount; i++) {
     const hostname =
         i === 0 ? "controlplane" : i === 1 ? "worker" : `worker-${i}`;
     hostnames.push(hostname);
-    const userDataBase64 = createUserData(hostname);
 
     nodes.push(
         new linode.Instance(`kube-node-${i + 1}`, {
@@ -118,7 +85,7 @@ for (let i = 0; i < nodeCount; i++) {
             region,
             type: instanceType,
             image,
-            rootPass: rootPassword.result,
+            rootPass: rootPasswordSecret,
             authorizedKeys: [sshPublicKey],
             privateIp: true,
             tags: ["pulumi", "kubeadm"],
@@ -132,14 +99,41 @@ for (let i = 0; i < nodeCount; i++) {
                     subnetId: targetVpcSubnetId,
                 },
             ],
-            metadatas: [
-                {
-                    userData: userDataBase64,
-                },
-            ],
         }),
     );
 }
+
+const bootstrapResources: command.remote.Command[] = nodes.map((node, index) => {
+    const hostname = hostnames[index];
+    const bootstrapScript = pulumi.interpolate`
+set -euxo pipefail
+hostnamectl set-hostname ${hostname}
+export DEBIAN_FRONTEND=noninteractive
+apt-get update
+apt-get install -y apt-transport-https ca-certificates curl gpg
+mkdir -p /etc/apt/keyrings
+curl -fsSL https://pkgs.k8s.io/core:/stable:/v1.28/deb/Release.key | gpg --dearmor -o /etc/apt/keyrings/kubernetes-apt-keyring.gpg
+echo 'deb [signed-by=/etc/apt/keyrings/kubernetes-apt-keyring.gpg] https://pkgs.k8s.io/core:/stable:/v1.28/deb/ /' > /etc/apt/sources.list.d/kubernetes.list
+apt-get update
+apt-get install -y kubelet kubeadm kubectl
+apt-mark hold kubelet kubeadm kubectl
+systemctl enable kubelet
+swapoff -a || true
+`;
+
+    return new command.remote.Command(`bootstrap-${index + 1}`, {
+        connection: {
+            host: node.ipAddress,
+            user: "root",
+            password: rootPasswordSecret,
+        },
+        create: bootstrapScript,
+        triggers: [
+            pulumi.interpolate`${hostname}-k8s-bootstrap`,
+            bootstrapScript,
+        ],
+    }, { dependsOn: node });
+});
 
 interface NodeDetails {
     hostname: string;
