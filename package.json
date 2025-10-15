@@ -11,7 +11,7 @@
     "typecheck": "npm run build"
   },
   "dependencies": {
-    "@pulumi/linode": "^5.21.0",
+    "@pulumi/linode": "^5.4.0",
     "@pulumi/pulumi": "^3.111.1",
     "@pulumi/random": "^4.13.0"
   },

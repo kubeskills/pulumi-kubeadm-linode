@@ -9,6 +9,21 @@ const image = config.get("image") ?? "linode/ubuntu22.04";
 const sshPublicKey = config.require("sshPublicKey");
 const nodeCount = config.getNumber("nodeCount") ?? 2;
 
+const stack = pulumi.getStack();
+const sanitizeLabel = (label: string, fallback: string) => {
+    const sanitized = label
+        .replace(/[^a-zA-Z0-9-]/g, "-")
+        .replace(/-+/g, "-")
+        .replace(/^-+/, "")
+        .replace(/-+$/, "");
+    return sanitized.length > 0 ? sanitized : fallback;
+};
+
+const vpcLabel = config.get("vpcLabel") ?? sanitizeLabel(`kubeadm-vpc-${stack}`, "kubeadm-vpc");
+const vpcSubnetLabel =
+    config.get("vpcSubnetLabel") ?? sanitizeLabel(`kubeadm-subnet-${stack}`, "kubeadm-subnet");
+const vpcSubnetCidr = config.get("vpcSubnetCidr") ?? "10.0.0.0/24";
+
 const rootPassword = new random.RandomPassword("linode-root-password", {
     length: 20,
     minLower: 1,
@@ -17,6 +32,22 @@ const rootPassword = new random.RandomPassword("linode-root-password", {
     minSpecial: 1,
     overrideSpecial: "!@#$%^&*()-_=+[]{}<>?",
 });
+
+const kubeVpc = new linode.Vpc("cluster-vpc", {
+    label: vpcLabel,
+    region,
+    description: "Pulumi-managed VPC for kubeadm nodes",
+});
+
+const kubeVpcId = kubeVpc.id.apply((id) => Number(id));
+
+const kubeVpcSubnet = new linode.VpcSubnet("cluster-subnet", {
+    vpcId: kubeVpcId,
+    label: vpcSubnetLabel,
+    ipv4: vpcSubnetCidr,
+});
+
+const kubeVpcSubnetId = kubeVpcSubnet.id.apply((id) => Number(id));
 
 const createUserData = (hostname: string): string => {
     const bootstrapScriptLines = [
@@ -71,23 +102,41 @@ for (let i = 0; i < nodeCount; i++) {
             authorizedKeys: [sshPublicKey],
             privateIp: true,
             tags: ["pulumi", "kubeadm"],
-            metadata: {
-                userData: userDataBase64,
-            },
+            interfaces: [
+                {
+                    purpose: "public",
+                    primary: true,
+                },
+                {
+                    purpose: "vpc",
+                    vpcId: kubeVpcId,
+                    subnetId: kubeVpcSubnetId,
+                },
+            ],
+            metadatas: [
+                {
+                    userData: userDataBase64,
+                },
+            ],
         }),
     );
 }
 
-const nodeDetailsOutputs = nodes.map((node, index) =>
+interface NodeDetails {
+    hostname: string;
+    id: string;
+    publicIp: string;
+    privateIp: string;
+}
+
+const nodeDetailsOutputs: pulumi.Output<NodeDetails>[] = nodes.map((node, index) =>
     pulumi
-        .all({
-            id: node.id,
-            publicIp: node.ipAddress,
-            privateIp: node.privateIpAddress,
-        })
-        .apply((details) => ({
+        .all([node.id, node.ipAddress, node.privateIpAddress])
+        .apply(([id, publicIp, privateIp]) => ({
             hostname: hostnames[index],
-            ...details,
+            id,
+            publicIp,
+            privateIp,
         })),
 );
 
@@ -120,3 +169,6 @@ export const controlplanePublicIp = nodeDetailsAll.apply((details) =>
 export const workerPublicIp = nodeDetailsAll.apply((details) =>
     details.find((d) => d.hostname === "worker")?.publicIp,
 );
+
+export const vpcId = kubeVpcId;
+export const vpcSubnetId = kubeVpcSubnetId;
