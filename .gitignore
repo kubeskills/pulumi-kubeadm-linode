@@ -208,6 +208,9 @@ __marimo__/
 
 # Node.js dependencies
 node_modules/
+npm-debug.log*
+.npm/
+.npmrc
 
 # Pulumi stack state and secrets
 Pulumi.*.yaml
