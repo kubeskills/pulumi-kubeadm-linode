@@ -222,3 +222,6 @@ bin/
 Pulumi.*.yaml
 Pulumi.*.json
 .pulumi/
+
+# Local Ansible inventory
+ansible/inventory.ini

@@ -2,6 +2,7 @@
 - name: Prepare Kubernetes nodes
   hosts: kube_nodes
   become: true
+  become_method: sudo
   vars:
     kubernetes_apt_release: "https://pkgs.k8s.io/core:/stable:/v1.28"
     kubernetes_packages:
@@ -19,32 +20,35 @@
         state: present
         update_cache: true
 
+    - name: Ensure apt keyrings directory exists
+      ansible.builtin.file:
+        path: /etc/apt/keyrings
+        state: directory
+        mode: '0755'
+
     - name: Download Kubernetes apt repository key
       ansible.builtin.get_url:
         url: "{{ kubernetes_apt_release }}/deb/Release.key"
-        dest: /tmp/kubernetes-apt-keyring.asc
+        dest: /etc/apt/keyrings/kubernetes-apt-keyring.asc
         mode: '0644'
 
     - name: Convert repository key to GPG format
       ansible.builtin.command:
         cmd: >
           gpg --dearmor --yes
-          --output /usr/share/keyrings/kubernetes-apt-keyring.gpg
-          /tmp/kubernetes-apt-keyring.asc
+          --output /etc/apt/keyrings/kubernetes-apt-keyring.gpg
+          /etc/apt/keyrings/kubernetes-apt-keyring.asc
       args:
-        creates: /usr/share/keyrings/kubernetes-apt-keyring.gpg
-
-    - name: Remove temporary key file
-      ansible.builtin.file:
-        path: /tmp/kubernetes-apt-keyring.asc
-        state: absent
+        creates: /etc/apt/keyrings/kubernetes-apt-keyring.gpg
+      register: convert_gpg
+      changed_when: convert_gpg.rc == 0
 
     - name: Configure Kubernetes apt repository
       ansible.builtin.copy:
         dest: /etc/apt/sources.list.d/kubernetes.list
         mode: '0644'
         content: |
-          deb [signed-by=/usr/share/keyrings/kubernetes-apt-keyring.gpg] {{ kubernetes_apt_release }}/deb/ /
+          deb [signed-by=/etc/apt/keyrings/kubernetes-apt-keyring.gpg] {{ kubernetes_apt_release }}/deb/ /
 
     - name: Update apt cache after adding Kubernetes repository
       ansible.builtin.apt:
@@ -55,6 +59,15 @@
         name: "{{ kubernetes_packages }}"
         state: present
         update_cache: true
+
+    - name: Verify Kubernetes binaries are present
+      ansible.builtin.command: "which {{ item }}"
+      loop:
+        - kubectl
+        - kubeadm
+        - kubelet
+      register: kubernetes_binaries_check
+      changed_when: false
 
     - name: Hold Kubernetes packages at current version
       ansible.builtin.shell: "apt-mark hold {{ item }}"

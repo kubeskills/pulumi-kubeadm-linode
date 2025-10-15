@@ -154,5 +154,8 @@ export const vpcId = targetVpcId;
 export const vpcSubnetId = targetVpcSubnetId;
 
 export const ansibleInventoryLines = nodeDetailsAll.apply((details) =>
-    details.map((detail) => `${detail.hostname} ansible_host=${detail.publicIp}`),
+    details.map(
+        (detail) =>
+            `${detail.hostname} ansible_host=${detail.publicIp} ansible_user=root node_hostname=${detail.hostname}`,
+    ),
 );

@@ -38,17 +38,22 @@ When `existingVpcId` and `existingVpcSubnetId` are supplied, the stack attaches 
 After `pulumi up`, configure the nodes with Ansible using the playbook at `ansible/playbook.yml`:
 
 ```bash
-# Example: capture inventory lines into a file
-pulumi stack output ansibleInventoryLines --json | jq -r '.[]' > inventory.ini
+# Start from the provided inventory template
+cp ansible/inventory.example.ini ansible/inventory.ini
 
-# Edit inventory.ini to group hosts, optionally supplying desired hostnames
+# Append the stack output inventory lines under the kube_nodes group
+pulumi stack output ansibleInventoryLines --json | jq -r '.[]' >> ansible/inventory.ini
+
+# Edit ansible/inventory.ini if you need to adjust hostnames or SSH users
 [kube_nodes]
-controlplane ansible_host=198.51.100.10 node_hostname=controlplane
-worker ansible_host=198.51.100.11 node_hostname=worker
+controlplane ansible_host=198.51.100.10 ansible_user=root node_hostname=controlplane
+worker ansible_host=198.51.100.11 ansible_user=root node_hostname=worker
 
 # Run the playbook (assumes your SSH key matches the authorized key configured above)
-ansible-playbook -i inventory.ini ansible/playbook.yml
+ansible-playbook ansible/playbook.yml
 ```
+
+The root-level `ansible.cfg` mirrors the Linode guide by disabling host key checking for first-run convenience and by defaulting the inventory to `ansible/inventory.ini`. Adjust these settings as needed for your environment after the initial configuration.
 
 The playbook installs Kubernetes components, holds their versions, enables the kubelet, optionally sets a hostname when `node_hostname` is provided, and disables swap.
 
