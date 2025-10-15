@@ -8,6 +8,8 @@ const region = config.get("region") ?? "us-east";
 const instanceType = config.get("instanceType") ?? "g6-standard-2";
 const image = config.get("image") ?? "linode/ubuntu22.04";
 const sshPublicKey = config.require("sshPublicKey");
+const sshPrivateKey = config.requireSecret("sshPrivateKey");
+const sshUser = config.get("sshUser") ?? "root";
 const nodeCount = config.getNumber("nodeCount") ?? 2;
 
 const existingVpcId = config.getNumber("existingVpcId");
@@ -124,8 +126,9 @@ swapoff -a || true
     return new command.remote.Command(`bootstrap-${index + 1}`, {
         connection: {
             host: node.ipAddress,
-            user: "root",
-            password: rootPasswordSecret,
+            user: sshUser,
+            privateKey: sshPrivateKey,
+            dialErrorLimit: 30,
         },
         create: bootstrapScript,
         triggers: [

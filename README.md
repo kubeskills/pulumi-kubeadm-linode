@@ -6,6 +6,7 @@ This Pulumi program provisions two Linode instances (or a configurable count) in
 - Pulumi CLI configured with Linode access token (`linode:token` config).
 - Node.js 18+ and npm.
 - An SSH key pair whose public key you can authorize on each instance.
+  Make sure to set both `sshPublicKey` and `sshPrivateKey` Pulumi configs with the matching key pair.
 
 ## Setup
 ```bash
@@ -13,6 +14,9 @@ npm install
 pulumi stack init kubeadm-dev  # or reuse an existing stack
 pulumi config set linode:token <your-linode-token> --secret
 pulumi config set sshPublicKey "$(cat ~/.ssh/id_rsa.pub)"
+pulumi config set sshPrivateKey "$(cat ~/.ssh/id_rsa)" --secret
+# Optional SSH overrides
+pulumi config set sshUser root
 # Optional overrides
 pulumi config set region us-east
 pulumi config set instanceType g6-standard-2
@@ -35,7 +39,7 @@ Public IPs are labeled with their hostnames (`controlplane`, `worker`) for easy 
 
 When `existingVpcId` and `existingVpcSubnetId` are supplied, the stack attaches the instances to that network instead of creating a new VPC.
 
-Each instance is configured immediately after provisioning via the Pulumi Command provider—`hostnamectl` sets the hostname, Kubernetes apt repositories are added, and `kubeadm`, `kubelet`, and `kubectl` are installed and held to the current version.
+Each instance is configured immediately after provisioning via the Pulumi Command provider over SSH (default user `root`, override with `sshUser`)—`hostnamectl` sets the hostname, Kubernetes apt repositories are added, and `kubeadm`, `kubelet`, and `kubectl` are installed and held to the current version.
 
 ## Cleanup
 When you are finished, remove the resources with:
